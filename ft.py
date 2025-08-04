@@ -58,7 +58,7 @@ models = [
 ]
 
 
-def fine_tune_model(model_name, total_steps=15000, initial_lr=0.01):
+def fine_tune_model(model_name, num_epochs=10, initial_lr=0.01):
     print(f"Full fine-tuning {model_name}")
 
     if model_name == "vit-small-patch16-224":
@@ -78,21 +78,19 @@ def fine_tune_model(model_name, total_steps=15000, initial_lr=0.01):
     optimizer = torch.optim.SGD(
         model.parameters(), lr=initial_lr, momentum=0.9)
 
-    scheduler = CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=0)
+    # Set T_max to num_epochs for CosineAnnealingLR to run over the full training
+    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=0)
 
     criterion = nn.CrossEntropyLoss()
 
     start_time = time.time()
+    val_accuracy = 0.0
 
-    global_step = 0
-    epoch = 0
-    while global_step < total_steps:
+    for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
         num_batches = 0
         for inputs, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}'):
-            if global_step >= total_steps:
-                break
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -100,17 +98,18 @@ def fine_tune_model(model_name, total_steps=15000, initial_lr=0.01):
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
-            scheduler.step()
             running_loss += loss.item()
             num_batches += 1
-            global_step += 1
+        scheduler.step()
         if num_batches > 0:
             print(f'Epoch {epoch+1}, Train Loss: {running_loss / num_batches}')
 
+        # Validation
         model.eval()
         val_loss = 0.0
         correct = 0
         total = 0
+
         with torch.no_grad():
             for inputs, labels in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
@@ -126,8 +125,6 @@ def fine_tune_model(model_name, total_steps=15000, initial_lr=0.01):
         print(
             f'Epoch {epoch+1}, Val Loss: {val_loss / len(val_loader)}, Val Accuracy: {val_accuracy}')
 
-        epoch += 1
-
     end_time = time.time()
     elapsed_time = end_time - start_time
     elapsed_formatted = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
@@ -140,8 +137,10 @@ def fine_tune_model(model_name, total_steps=15000, initial_lr=0.01):
     log_file = "fine_tuning_times.log"
     with open(log_file, "a") as f:
         f.write(
-            f"Model: {model_name}, Time: {elapsed_formatted} (HH:MM:SS) or {elapsed_time:.2f} seconds\n")
+            f"Model: {model_name}, Time: {elapsed_formatted} (HH:MM:SS) or {elapsed_time:.2f} seconds, "
+            f"Final Val Accuracy: {val_accuracy:.4f}\n"
+        )
 
 
 for model_name in models:
-    fine_tune_model(model_name)
+    fine_tune_model(model_name, num_epochs=10)
